@@ -48,6 +48,16 @@ CREATE TABLE IF NOT EXISTS signals_log (
     llm_justification         TEXT
 );
 
+-- Noticias corporativas ya notificadas (evita repetir la misma alerta cada noche).
+CREATE TABLE IF NOT EXISTS corporate_news_seen (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    company   TEXT NOT NULL,
+    news_key  TEXT NOT NULL,
+    title     TEXT,
+    seen_at   TEXT NOT NULL,
+    UNIQUE (company, news_key)
+);
+
 CREATE INDEX IF NOT EXISTS idx_market_ticker_date ON market_data (ticker, date);
 CREATE INDEX IF NOT EXISTS idx_signals_ticker_ts ON signals_log (ticker, timestamp);
 """
@@ -162,3 +172,35 @@ class Database:
                 "SELECT * FROM signals_log ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def signals_between(self, start: datetime, end: datetime) -> list[dict[str, Any]]:
+        """Señales con `start <= timestamp < end` (fechas con zona horaria, se comparan en UTC)."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM signals_log WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp",
+                (
+                    start.astimezone(timezone.utc).isoformat(timespec="seconds"),
+                    end.astimezone(timezone.utc).isoformat(timespec="seconds"),
+                ),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def close_on_or_before(self, ticker: str, date: str) -> float | None:
+        """Último cierre guardado en `market_data` hasta `date` (YYYY-MM-DD) inclusive."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT close FROM market_data WHERE ticker = ? AND date <= ? ORDER BY date DESC LIMIT 1",
+                (ticker, date),
+            ).fetchone()
+        return None if row is None else float(row["close"])
+
+    # ----------------------------------------------------- corporate_news_seen
+    def mark_news_seen(self, company: str, news_key: str, title: str = "") -> bool:
+        """Registra la noticia. Devuelve True si era nueva, False si ya se había visto."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO corporate_news_seen (company, news_key, title, seen_at)
+                   VALUES (?, ?, ?, ?)""",
+                (company, news_key, title, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+            )
+            return cur.rowcount == 1

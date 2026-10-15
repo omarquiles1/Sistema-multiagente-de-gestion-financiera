@@ -7,6 +7,14 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
+
+try:  # el .env se carga antes de leer cualquier variable de entorno
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+except ImportError:  # python-dotenv es opcional: las variables pueden venir del sistema
+    pass
 
 
 @dataclass(frozen=True)
@@ -61,6 +69,18 @@ class Thresholds:
     wash_sale_days: int = 61                  # regla de los 2 meses (art. 33.5 LIRPF)
 
 
+@dataclass(frozen=True)
+class AlertRules:
+    """Cuándo se avisa por Telegram y cuándo corre el servicio continuo."""
+
+    strong_signal_score: int = 60          # |final_score| > 60 -> Fuerte Compra / Fuerte Venta
+    timezone: str = "Europe/Madrid"
+    daily_run_time: str = "22:30"          # lunes a viernes, tras el cierre de EE. UU.
+    weekly_report_day: str = "friday"
+    weekly_report_time: str = "23:00"
+    performance_horizons_days: tuple[int, ...] = (7, 30)
+
+
 # P/E de referencia por sector (aprox. medianas del S&P 500, revisables).
 # yfinance no ofrece el P/E sectorial; se mantiene editable aquí.
 SECTOR_PE: dict[str, float] = {
@@ -84,6 +104,7 @@ class Settings:
     risk: RiskRules = field(default_factory=RiskRules)
     weights: ConsensusWeights = field(default_factory=ConsensusWeights)
     thresholds: Thresholds = field(default_factory=Thresholds)
+    alerts: AlertRules = field(default_factory=AlertRules)
     llm_model: str = os.getenv("LLM_MODEL", "claude-opus-5-5")
     db_path: str = os.getenv("DB_PATH", "portfolio.db")
     history_period: str = "2y"
@@ -91,6 +112,7 @@ class Settings:
     fallback_fed_rate: float = float(os.getenv("FALLBACK_FED_RATE", "4.25"))
     fallback_ecb_rate: float = float(os.getenv("FALLBACK_ECB_RATE", "2.00"))
     base_currency: str = "EUR"
+    watchlist_path: str = os.getenv("WATCHLIST_PATH", str(Path(__file__).resolve().parent / "watchlist.json"))
 
 
 SETTINGS = Settings()
