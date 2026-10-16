@@ -11,6 +11,9 @@ Calendario (zona Europe/Madrid, configurable en `config.AlertRules`):
 
 Solo se envía alerta de una señal si |final_score| > 60 (Fuerte Compra / Fuerte Venta)
 o si hay un veto de riesgo activo. Todas las señales se guardan igualmente en SQLite.
+Anti-spam: un activo que solo alerta por veto avisa la primera vez y luego calla 4 días
+mientras el veto siga igual; se rearma si el veto desaparece o cambia, o si el francotirador
+detecta una oportunidad en ese activo.
 
 Uso:
   python scheduler.py                 # servicio continuo + bot de comandos (Ctrl+C para parar)
@@ -28,6 +31,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 import schedule
@@ -59,6 +63,7 @@ class RunSummary:
     analyzed: list[str] = field(default_factory=list)
     alerted: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
+    muted: list[str] = field(default_factory=list)      # vetos repetidos en cooldown
     corporate_alerts: int = 0
     messages: list[str] = field(default_factory=list)
 
@@ -87,13 +92,13 @@ class MarketService:
         self._send = send
         # Un solo análisis a la vez: la pasada diaria y /analiza comparten orquestador y yfinance.
         self._analysis_lock = threading.Lock()
-        self.sniper = Sniper(self.analyze, self.emit, rules=settings.alerts)
+        self.sniper = Sniper(self.analyze, self.emit, rules=settings.alerts, on_opportunity=self.db.clear_veto_alert)
 
-    def analyze(self, ticker: str, live_price: float | None = None):
+    def analyze(self, ticker: str, live_price: float | None = None, dip_mode: bool = False):
         with self._analysis_lock:
-            if live_price is None:
+            if live_price is None and not dip_mode:
                 return self.orchestrator.analyze(ticker)
-            return self.orchestrator.analyze(ticker, live_price=live_price)
+            return self.orchestrator.analyze(ticker, live_price=live_price, dip_mode=dip_mode)
 
     def emit(self, text: str) -> None:
         if self.dry_run:
@@ -106,7 +111,26 @@ class MarketService:
         self.emit(text)
 
     # ----------------------------------------------------------------- jobs
-    def daily_job(self) -> RunSummary:
+    def veto_muted(self, ticker: str, decision: CIODecision, now: datetime) -> bool:
+        """Cooldown de vetos. Actualiza la memoria y dice si el aviso debe silenciarse.
+
+        Solo se silencian los avisos que se deben ÚNICAMENTE a un veto que sigue igual que el
+        último avisado hace menos de `veto_alert_cooldown_days`.
+        """
+        if not decision.vetoes:
+            return False
+        key = " | ".join(sorted(decision.vetoes))
+        strong = self.settings.alerts.strong_signal_score
+        veto_only = -strong <= decision.final_score <= strong
+        last = self.db.get_veto_alert(ticker)
+        cooldown = timedelta(days=self.settings.alerts.veto_alert_cooldown_days)
+        if veto_only and last and last["veto_key"] == key and now - datetime.fromisoformat(last["alerted_at"]) < cooldown:
+            return True
+        self.db.set_veto_alert(ticker, key, now)
+        return False
+
+    def daily_job(self, now: datetime | None = None) -> RunSummary:
+        now = now or datetime.now(timezone.utc)
         summary = RunSummary()
         strong = self.settings.alerts.strong_signal_score
         for ticker in self.watchlist.tickers:
@@ -119,7 +143,13 @@ class MarketService:
             summary.analyzed.append(ticker)
             d = result.decision
             log.info("%s -> %s (%+d)", ticker, d.action.value, d.final_score)
-            if should_alert(d, strong):
+            if not d.vetoes:
+                self.db.clear_veto_alert(ticker)    # el veto ha desaparecido: se rearma el aviso
+            if should_alert(d, strong) and self.veto_muted(ticker, d, now):
+                log.info("%s: veto sin cambios avisado hace < %d días, en silencio",
+                         ticker, self.settings.alerts.veto_alert_cooldown_days)
+                summary.muted.append(ticker)
+            elif should_alert(d, strong):
                 self.notify(
                     format_signal(
                         d.to_output_json(), d.vetoes, d.guardrail_notes, strong,
@@ -139,8 +169,9 @@ class MarketService:
                 "⚙️ Ejecución diaria con incidencias: no se pudo analizar " + ", ".join(summary.failed), summary
             )
         log.info(
-            "Pasada diaria: %d analizados, %d alertas, %d fallos, %d noticias corporativas",
-            len(summary.analyzed), len(summary.alerted), len(summary.failed), summary.corporate_alerts,
+            "Pasada diaria: %d analizados, %d alertas, %d silenciadas, %d fallos, %d noticias corporativas",
+            len(summary.analyzed), len(summary.alerted), len(summary.muted), len(summary.failed),
+            summary.corporate_alerts,
         )
         return summary
 

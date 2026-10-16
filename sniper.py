@@ -7,7 +7,8 @@ Cada `sniper_interval_minutes`, para los activos de la watchlist cuyo mercado es
      recalculado con el precio en vivo, cruza por debajo de `dip_rsi` (30).
   3. Ejecuta INMEDIATAMENTE los 5 agentes con el precio en vivo y avisa por Telegram. Si el
      Fundamental sigue alto (>= `dip_min_fundamental`), la alerta va encabezada con
-     "🚨 OPORTUNIDAD DE CAÍDA DETECTADA".
+     "🚨 OPORTUNIDAD DE CAÍDA DETECTADA" y el CIO, en modo Buy the Dip, ignora los vetos de
+     caída libre / volatilidad extrema y emite BUY (con el tamaño del RiskManager).
 
 Cada disparo se avisa una vez al día por activo; una caída que se agrava vuelve a avisar
 en cada nuevo tramo de 5 % (−10 %, −15 %…).
@@ -27,6 +28,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from agents.cio import fundamental_intact
 from agents.technical import rsi
 from config import SETTINGS, AlertRules
 from notifier import format_signal, support_from_reports
@@ -127,10 +129,11 @@ class SniperEvent:
 
 @dataclass
 class Sniper:
-    analyze_fn: Callable[..., Any]                 # analyze(ticker, live_price=...)
+    analyze_fn: Callable[..., Any]                 # analyze(ticker, live_price=..., dip_mode=True)
     notify: Callable[[str], Any]
     fetch: Callable[[list[str]], dict[str, LiveQuote]] = fetch_live_quotes
     rules: AlertRules = field(default_factory=lambda: SETTINGS.alerts)
+    on_opportunity: Callable[[str], Any] | None = None    # p. ej. rearmar el aviso de veto del activo
     _fired: set[tuple[date, str, str]] = field(default_factory=set)
 
     # ------------------------------------------------------------ reglas
@@ -174,7 +177,7 @@ class Sniper:
     def _fire(self, q: LiveQuote, reasons: list[str]) -> SniperEvent:
         e = html.escape
         try:
-            result = self.analyze_fn(q.ticker, live_price=q.price)
+            result = self.analyze_fn(q.ticker, live_price=q.price, dip_mode=True)
         except Exception as exc:
             msg = (
                 f"📉 <b>Caída en {e(q.ticker)}: {q.change_pct:+.1f}%</b>\n" + "\n".join(f"• {e(r)}" for r in reasons)
@@ -184,7 +187,7 @@ class Sniper:
             return SniperEvent(q, reasons, msg, False)
 
         fund = result.reports["fundamental"]
-        intact = fund.error is None and fund.score >= self.rules.dip_min_fundamental
+        intact = fundamental_intact(result.reports, self.rules.dip_min_fundamental)
         if intact:
             what = f"ha caído un {-q.change_pct:.1f}%" if q.change_pct < 0 else f"entra en sobreventa (RSI {q.rsi_now:.0f})"
             header = f"🚨 <b>OPORTUNIDAD DE CAÍDA DETECTADA: {e(q.ticker)} {what}. El fundamental sigue intacto.</b>"
@@ -205,4 +208,6 @@ class Sniper:
             support=support_from_reports(result.reports), header=f"{header}\n{context}\n",
         )
         self.notify(msg)
+        if intact and self.on_opportunity:
+            self.on_opportunity(q.ticker)
         return SniperEvent(q, reasons, msg, intact, result)

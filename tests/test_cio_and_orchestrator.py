@@ -85,6 +85,56 @@ def test_wash_sale_warning():
     assert any("dos meses" in n for n in d.guardrail_notes)
 
 
+# ------------------------------------------------------------ Buy the Dip
+def llm_hold():
+    return FakeLLM({
+        "ticker": "TEST", "action": "HOLD", "final_score": 5, "confidence_level": "LOW",
+        "justification": "Caída libre: se respeta el veto.",
+        "execution_parameters": {"suggested_position_size_eur": 0, "stop_loss_price": 1.0, "take_profit_target": 2.0},
+    })
+
+
+@pytest.mark.parametrize("kw", [{"tflags": [FREE_FALL_FLAG]}, {"rflags": [EXTREME_VOL_FLAG]}])
+def test_dip_mode_ignores_vetoes_and_forces_buy(kw):
+    # Desplome: técnico y sentimiento hundidos, fundamental sólido (80 >= 60).
+    d = CIOAgent(llm_hold()).decide("TEST", reports(f=80, t=10, s=-60, r=20, **kw), PLAN, dip_mode=True)
+    assert d.action is Action.BUY and d.buy_the_dip
+    assert d.vetoes                                          # el veto se informa, pero no bloquea
+    assert d.suggested_position_size_eur == pytest.approx(700.0)
+    assert any("vetos ignorados" in n for n in d.guardrail_notes)
+    assert any("convertido en BUY" in n for n in d.guardrail_notes)
+
+
+def test_dip_mode_tells_llm_and_hides_vetoes():
+    llm = llm_hold()
+    CIOAgent(llm).decide("TEST", reports(f=80, tflags=[FREE_FALL_FLAG]), PLAN, dip_mode=True)
+    assert '"buy_the_dip": true' in llm.calls[0]["user"]
+    assert '"hard_vetoes_on_buy": []' in llm.calls[0]["user"]
+
+
+def test_dip_mode_needs_intact_fundamental():
+    d = CIOAgent(llm_hold()).decide("TEST", reports(f=50, tflags=[FREE_FALL_FLAG]), PLAN, dip_mode=True)
+    assert d.action is Action.HOLD and not d.buy_the_dip
+
+
+def test_dip_mode_ignores_etf_without_fundamentals():
+    r = reports(f=80, tflags=[FREE_FALL_FLAG])
+    r["fundamental"].error = "sin datos"
+    assert CIOAgent(llm_buy()).decide("TEST", r, PLAN, dip_mode=True).action is Action.HOLD
+
+
+def test_dip_mode_still_respects_risk_manager_and_cooldown():
+    untradeable = RiskManager().build_plan(100.0, 2.0, cash_available_eur=100)
+    assert CIOAgent(llm_hold()).decide("TEST", reports(f=80), untradeable, dip_mode=True).action is Action.HOLD
+    recent = [{"timestamp": (datetime.now(timezone.utc) - timedelta(days=2)).isoformat(), "recommended_action": "BUY"}]
+    assert CIOAgent(llm_hold()).decide("TEST", reports(f=80), PLAN, recent, dip_mode=True).action is Action.HOLD
+
+
+def test_veto_still_applies_outside_dip_mode():
+    d = CIOAgent(llm_buy()).decide("TEST", reports(f=80, tflags=[FREE_FALL_FLAG]), PLAN)
+    assert d.action is Action.HOLD and not d.buy_the_dip
+
+
 def test_justification_truncated_to_50_words():
     llm = llm_buy()
     llm.response["justification"] = "palabra " * 80

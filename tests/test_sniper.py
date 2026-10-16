@@ -125,8 +125,8 @@ class Result:
 def make_sniper(quotes, result=None):
     sent, calls = [], []
 
-    def analyze(ticker, live_price=None):
-        calls.append((ticker, live_price))
+    def analyze(ticker, live_price=None, dip_mode=False):
+        calls.append((ticker, live_price, dip_mode))
         if isinstance(result, Exception):
             raise result
         return result or Result()
@@ -138,10 +138,21 @@ def test_drop_with_intact_fundamental_fires_opportunity():
     q = quote(-6.0)
     sniper, sent, calls = make_sniper([q])
     events = sniper.scan(["NVDA"], now=madrid(17))
-    assert calls == [("NVDA", q.price)]                     # análisis con el precio de 1 minuto
+    assert calls == [("NVDA", q.price, True)]               # precio de 1 minuto + modo Buy the Dip
     assert events[0].opportunity
     assert sent[0].startswith("🚨 <b>OPORTUNIDAD DE CAÍDA DETECTADA: NVDA ha caído un 6.0%. El fundamental sigue intacto.</b>")
     assert "🛡️ Soporte clave cercano" in sent[0] and "Precio 1m" in sent[0]
+
+
+def test_opportunity_calls_hook_only_when_intact():
+    rearmed = []
+    sniper, _, _ = make_sniper([quote(-6.0)])
+    sniper.on_opportunity = rearmed.append
+    sniper.scan(["NVDA"], now=madrid(17))
+    weak, _, _ = make_sniper([quote(-6.0)], Result(fund_score=40))
+    weak.on_opportunity = rearmed.append
+    weak.scan(["NVDA"], now=madrid(17))
+    assert rearmed == ["NVDA"]
 
 
 def test_drop_with_weak_fundamental_is_plain_crash_alert():

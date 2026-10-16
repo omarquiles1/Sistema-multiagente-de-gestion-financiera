@@ -55,7 +55,7 @@ pip install -r requirements.txt
 cp .env.example .env                      # rellena ANTHROPIC_API_KEY y Telegram
 python main.py MSFT                       # informe + JSON
 python main.py MSFT SAN.MC ASML.AS --json-only --db cartera.db
-python -m pytest -q                       # 128 tests, sin red
+python -m pytest -q                       # 141 tests, sin red
 ```
 
 Las variables se leen del `.env` (con `python-dotenv`) o del entorno del sistema; las del
@@ -81,6 +81,11 @@ python performance_tracker.py --send      # auditoría suelta, enviada por Teleg
 (Fuerte Compra), `final_score < −60` (Fuerte Venta) o hay un **veto de riesgo** activo. Las
 demás se guardan en SQLite sin avisar. Si un ticker falla, llega un aviso con la lista.
 
+**Anti-spam de vetos** (tabla `veto_alerts`): un activo que alerta solo por veto avisa la
+primera vez y calla 4 días (`veto_alert_cooldown_days`) mientras el veto siga igual. Se rearma si
+el veto desaparece o cambia, o si el francotirador detecta una oportunidad en ese activo. Las
+señales fuertes (|score| > 60) y las alertas del francotirador nunca se silencian.
+
 **Watchlist** (29 activos): ETF globales y sectoriales; Big Tech & IA (META, NVDA, GOOGL, AMZN,
 ASML, TSM); disruptivas (RDDT, IBKR, MELI, SPCX = SpaceX); energía y nuclear (OKLO, VST, URNM,
 CCJ, PLTR, CEG); y mercado español (IBE, REP, BBVA, SAN, TSK, IDR, ANA).
@@ -99,8 +104,11 @@ con el precio de 1 minuto y avisa:
   sigue intacto." con la señal del CIO y el soporte clave.
 * Si no (incluidos los ETF, sin fundamentales) → "📉 CAÍDA FUERTE", sin etiqueta de oportunidad.
 * Una vez al día por activo y regla; si la caída se agrava, nuevo aviso en cada tramo de 5 %.
-* Los guardarraíles del CIO siguen activos: si hay veto (caída libre bajo SMA200 o volatilidad
-  extrema), la oportunidad se avisa pero la acción no será BUY.
+* **Modo Buy the Dip del CIO**: en una oportunidad (Fundamental ≥ 60, sin errores; los ETF no
+  cuentan), el CIO ignora los vetos de "Caída libre bajo SMA200" y "Volatilidad extrema" y el
+  umbral de score, y emite **BUY** aunque el LLM proponga otra cosa. Siguen mandando el
+  RiskManager (10 % del capital descontando lo que ya tienes, liquidez, mínimo de 300 €) y el
+  anti-overtrading de 7 días. Fuera del francotirador los vetos funcionan como siempre.
 * Latencia: 1 minuto es la resolución más fina de Yahoo, pero Yahoo publica el mercado español con
   ~15 min de retraso; EE. UU. llega casi en tiempo real. Umbrales en `config.AlertRules`.
 

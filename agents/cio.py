@@ -6,6 +6,11 @@ Flujo:
   3. El LLM evalúa el contexto y emite el JSON estricto (structured outputs).
   4. Guardarraíles: el código acota el ajuste del LLM, impone los vetos, la regla anti-overtrading
      y SOBRESCRIBE los parámetros de ejecución con los del RiskManager.
+
+Modo Buy the Dip (`dip_mode=True`, solo desde el Francotirador): si el Fundamental sigue alto
+(>= `dip_min_fundamental`), la caída se trata como pánico de mercado: se ignoran los vetos de
+"Caída libre" y "Volatilidad extrema" y el umbral de score, y la señal es BUY. Siguen mandando
+el RiskManager (10 %, liquidez, mínimo de 300 €) y el anti-overtrading.
 """
 from __future__ import annotations
 
@@ -59,6 +64,9 @@ y únicamente por contexto cualitativo concreto que cites en la justificación.
 - VETO OBLIGATORIO: si el Agente Técnico indica "{free_fall}" o el Agente de Riesgo indica \
 "{extreme_vol}", NO puedes emitir BUY, independientemente de los fundamentales.
 - Si el RiskManager marca la operación como no ejecutable (`tradeable: false`), no emitas BUY.
+- MODO BUY THE DIP: si `buy_the_dip` es true, el detector intradía ha visto un desplome en una \
+empresa con fundamental sólido. Los vetos anteriores NO aplican: emite BUY (salvo `tradeable: false`) \
+y explica en la justificación por qué la caída es pánico de mercado y no deterioro del negocio.
 - Ante señales contradictorias o datos incompletos, prefiere HOLD y confianza LOW.
 - `execution_parameters` deben copiar EXACTAMENTE los valores del RiskManager \
 (suggested_position_size_eur = position_size_eur si la acción es BUY, 0 en otro caso). \
@@ -84,6 +92,12 @@ def detect_vetoes(reports: dict[str, AgentReport]) -> list[str]:
     if EXTREME_VOL_FLAG in reports["risk"].flags:
         vetoes.append(f"Riesgo: {EXTREME_VOL_FLAG}")
     return vetoes
+
+
+def fundamental_intact(reports: dict[str, AgentReport], min_score: float) -> bool:
+    """Fundamental alto y calculado sin errores (un ETF sin datos no cuenta como intacto)."""
+    f = reports["fundamental"]
+    return f.error is None and f.score >= min_score
 
 
 def _truncate_words(text: str, limit: int = 50) -> str:
@@ -126,12 +140,14 @@ class CIOAgent:
         return Confidence.LOW
 
     def build_user_prompt(
-        self, ticker: str, reports: dict[str, AgentReport], w_score: float, vetoes: list[str], plan: RiskPlan
+        self, ticker: str, reports: dict[str, AgentReport], w_score: float, vetoes: list[str], plan: RiskPlan,
+        buy_the_dip: bool = False,
     ) -> str:
         payload = {
             "ticker": ticker,
             "weighted_score": round(w_score, 2),
-            "hard_vetoes_on_buy": vetoes,
+            "buy_the_dip": buy_the_dip,
+            "hard_vetoes_on_buy": [] if buy_the_dip else vetoes,
             "agents": {k: r.to_dict() for k, r in reports.items()},
             "risk_manager": {
                 **plan.to_dict(),
@@ -152,16 +168,18 @@ class CIOAgent:
         reports: dict[str, AgentReport],
         plan: RiskPlan,
         recent_signals: list[dict[str, Any]] | None = None,
+        dip_mode: bool = False,
     ) -> CIODecision:
         t = self.settings.thresholds
         w_score = weighted_score(reports, self.settings)
         vetoes = detect_vetoes(reports)
         notes: list[str] = []
+        dip = dip_mode and fundamental_intact(reports, self.settings.alerts.dip_min_fundamental)
 
         try:
             out = self.llm.json_completion(
                 self.system_prompt,
-                self.build_user_prompt(ticker, reports, w_score, vetoes, plan),
+                self.build_user_prompt(ticker, reports, w_score, vetoes, plan, buy_the_dip=dip),
                 CIO_SCHEMA,
                 effort="high",
             )
@@ -187,15 +205,23 @@ class CIOAgent:
             notes.append(f"final_score del LLM ({final_score}) acotado a [{lo}, {hi}]")
             final_score = max(lo, min(hi, final_score))
 
+        # --- Modo Buy the Dip: el desplome con fundamental intacto es una compra.
+        if dip:
+            if action is not Action.BUY:
+                notes.append(f"Buy the Dip: {action.value} convertido en BUY (fundamental intacto)")
+                action = Action.BUY
+            if vetoes:
+                notes.append("Buy the Dip: vetos ignorados (" + "; ".join(vetoes) + ")")
+
         # --- Guardarraíl 2: condiciones necesarias para BUY.
         if action is Action.BUY:
-            if vetoes:
+            if vetoes and not dip:
                 notes.append("BUY vetado: " + "; ".join(vetoes))
                 action, confidence = Action.HOLD, Confidence.LOW
             elif not plan.tradeable:
                 notes.append(f"BUY anulado por RiskManager: {plan.reason}")
                 action = Action.HOLD
-            elif final_score < t.buy:
+            elif final_score < t.buy and not dip:
                 notes.append(f"BUY anulado: final_score {final_score} < umbral {t.buy}")
                 action = Action.HOLD
 
@@ -236,4 +262,5 @@ class CIOAgent:
             take_profit_target=plan.take_profit_target,
             vetoes=vetoes,
             guardrail_notes=notes,
+            buy_the_dip=dip and action is Action.BUY,
         )

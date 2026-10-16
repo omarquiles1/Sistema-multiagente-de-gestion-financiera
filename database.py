@@ -88,6 +88,13 @@ CREATE TABLE IF NOT EXISTS trades (
     pnl_realizado_eur   REAL
 );
 
+-- Último aviso por veto de cada activo (cooldown anti-spam de la pasada diaria).
+CREATE TABLE IF NOT EXISTS veto_alerts (
+    ticker      TEXT PRIMARY KEY,
+    veto_key    TEXT NOT NULL,
+    alerted_at  TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_market_ticker_date ON market_data (ticker, date);
 CREATE INDEX IF NOT EXISTS idx_signals_ticker_ts ON signals_log (ticker, timestamp);
 """
@@ -320,3 +327,21 @@ class Database:
         with self._conn() as conn:
             rows = conn.execute("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------ veto_alerts
+    def get_veto_alert(self, ticker: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM veto_alerts WHERE ticker = ?", (ticker,)).fetchone()
+        return None if row is None else dict(row)
+
+    def set_veto_alert(self, ticker: str, veto_key: str, alerted_at: datetime) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT INTO veto_alerts (ticker, veto_key, alerted_at) VALUES (?, ?, ?)
+                   ON CONFLICT(ticker) DO UPDATE SET veto_key=excluded.veto_key, alerted_at=excluded.alerted_at""",
+                (ticker, veto_key, alerted_at.astimezone(timezone.utc).isoformat(timespec="seconds")),
+            )
+
+    def clear_veto_alert(self, ticker: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM veto_alerts WHERE ticker = ?", (ticker,))

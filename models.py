@@ -104,6 +104,7 @@ class CIODecision:
     take_profit_target: float
     vetoes: list[str] = field(default_factory=list)
     guardrail_notes: list[str] = field(default_factory=list)
+    buy_the_dip: bool = False          # BUY forzado por oportunidad de caída (vetos ignorados)
 
     def to_output_json(self) -> dict[str, Any]:
         """Esquema EXACTO de salida exigido por la especificación."""

@@ -99,8 +99,9 @@ class Orchestrator:
             futures = {a.name: pool.submit(a.run, snapshot) for a in self.specialists}
             return {name: f.result() for name, f in futures.items()}
 
-    def analyze(self, ticker: str, live_price: float | None = None) -> AnalysisResult:
-        """`live_price`: último precio de 1 minuto (francotirador); sustituye al cierre de hoy."""
+    def analyze(self, ticker: str, live_price: float | None = None, dip_mode: bool = False) -> AnalysisResult:
+        """`live_price`: último precio de 1 minuto (francotirador); sustituye al cierre de hoy.
+        `dip_mode`: el francotirador detectó un desplome; activa el modo Buy the Dip del CIO."""
         ticker = ticker.upper().strip()
         log.info("[1-2] Descargando datos de %s", ticker)
         snapshot = self.fetcher.fetch(ticker)
@@ -119,7 +120,7 @@ class Orchestrator:
         )
         lookback = max(self.settings.thresholds.signal_cooldown_days, self.settings.thresholds.wash_sale_days)
         recent = self.db.recent_signals(ticker, lookback)
-        decision = self.cio.decide(ticker, reports, plan, recent)
+        decision = self.cio.decide(ticker, reports, plan, recent, dip_mode=dip_mode)
 
         log.info("[7] Persistiendo en SQLite")
         signal_id = self._persist(snapshot, reports, plan, decision)

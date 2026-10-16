@@ -84,6 +84,7 @@ class AlertRules:
     dip_drop_pct: float = 5.0               # caída diaria que fuerza el análisis completo
     dip_rsi: float = 30.0                   # RSI(14) que cruza por debajo de este nivel
     dip_min_fundamental: float = 60.0       # Fundamental (0-100) para "fundamental intacto"
+    veto_alert_cooldown_days: int = 4       # silencio tras avisar de un veto que sigue igual
 
 
 # P/E de referencia por sector (aprox. medianas del S&P 500, revisables).

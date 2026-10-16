@@ -224,6 +224,74 @@ def test_daily_job_only_alerts_strong_signals(tmp_path):
     assert len(sent) == 3 and "DDD" in sent[-1]
 
 
+# ------------------------------------------------------- cooldown de vetos
+VETO = ["Riesgo: Volatilidad extrema"]
+
+
+class SequenceOrchestrator:
+    """Devuelve la decisión que toque en cada pasada diaria."""
+
+    def __init__(self):
+        self.next = None
+
+    def analyze(self, ticker):
+        d = self.next
+
+        class R:
+            decision = d
+            reports = {}
+
+        return R()
+
+
+def veto_service(tmp_path):
+    sent = []
+    orch = SequenceOrchestrator()
+    service = MarketService(watchlist=Watchlist(groups={"g": ("SPCX",)}), db=Database(str(tmp_path / "t.db")),
+                            orchestrator=orch, corporate=NoCorporate(), send=sent.append)
+
+    def run(day, score=-26, vetoes=VETO):
+        orch.next = decision(score=score, action=Action.HOLD, vetoes=vetoes)
+        return service.daily_job(now=NOW + timedelta(days=day))
+
+    return service, sent, run
+
+
+def test_veto_alerts_once_then_silent_for_4_days(tmp_path):
+    _, sent, run = veto_service(tmp_path)
+    assert run(0).alerted == ["SPCX"]
+    for day in (1, 2, 3):
+        assert run(day).muted == ["SPCX"]
+    assert run(4).alerted == ["SPCX"]          # pasados 4 días vuelve a avisar
+    assert len(sent) == 2
+
+
+def test_veto_rearms_when_it_disappears(tmp_path):
+    _, sent, run = veto_service(tmp_path)
+    run(0)
+    assert run(1, vetoes=[]).alerted == []     # sin veto ni señal fuerte: nada que avisar
+    assert run(2).alerted == ["SPCX"]          # el veto vuelve: aviso nuevo
+
+
+def test_veto_change_alerts_again(tmp_path):
+    _, _, run = veto_service(tmp_path)
+    run(0)
+    assert run(1, vetoes=VETO + ["Técnico: Caída libre por debajo de SMA200"]).alerted == ["SPCX"]
+
+
+def test_strong_signal_is_never_muted_by_veto_cooldown(tmp_path):
+    _, _, run = veto_service(tmp_path)
+    run(0)
+    assert run(1, score=-75).alerted == ["SPCX"]
+
+
+def test_sniper_opportunity_rearms_veto_alert(tmp_path):
+    service, _, run = veto_service(tmp_path)
+    run(0)
+    service.sniper.on_opportunity("SPCX")
+    assert run(1).alerted == ["SPCX"]
+
+
 def test_register_weekdays_at_madrid_close(tmp_path):
     service = MarketService(watchlist=Watchlist(groups={}), db=Database(str(tmp_path / "t.db")),
                             orchestrator=StubOrchestrator({}), corporate=NoCorporate(), send=lambda t: True)
