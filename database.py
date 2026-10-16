@@ -58,6 +58,36 @@ CREATE TABLE IF NOT EXISTS corporate_news_seen (
     UNIQUE (company, news_key)
 );
 
+-- Cartera real: una fila por activo. precio_medio_compra en la divisa del activo.
+CREATE TABLE IF NOT EXISTS portfolio (
+    ticker               TEXT PRIMARY KEY,
+    nombre_activo        TEXT,
+    cantidad             REAL NOT NULL CHECK (cantidad > 0),
+    precio_medio_compra  REAL NOT NULL CHECK (precio_medio_compra > 0),
+    divisa               TEXT NOT NULL DEFAULT 'EUR'
+);
+
+-- Capital líquido (cash) en EUR. Una sola fila (id = 1).
+CREATE TABLE IF NOT EXISTS capital (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    cash_eur    REAL NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- Histórico de operaciones registradas desde Telegram o init_portfolio.py.
+CREATE TABLE IF NOT EXISTS trades (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp           TEXT NOT NULL,
+    ticker              TEXT NOT NULL,
+    side                TEXT NOT NULL CHECK (side IN ('BUY', 'SELL', 'INIT')),
+    cantidad            REAL NOT NULL,
+    precio              REAL NOT NULL,
+    divisa              TEXT NOT NULL,
+    fx_to_eur           REAL NOT NULL,
+    importe_eur         REAL NOT NULL,
+    pnl_realizado_eur   REAL
+);
+
 CREATE INDEX IF NOT EXISTS idx_market_ticker_date ON market_data (ticker, date);
 CREATE INDEX IF NOT EXISTS idx_signals_ticker_ts ON signals_log (ticker, timestamp);
 """
@@ -204,3 +234,89 @@ class Database:
                 (company, news_key, title, datetime.now(timezone.utc).isoformat(timespec="seconds")),
             )
             return cur.rowcount == 1
+
+    # ---------------------------------------------------------------- capital
+    def get_cash(self) -> float | None:
+        """Capital líquido en EUR, o None si la cartera no se ha inicializado."""
+        with self._conn() as conn:
+            row = conn.execute("SELECT cash_eur FROM capital WHERE id = 1").fetchone()
+        return None if row is None else float(row["cash_eur"])
+
+    def set_cash(self, cash_eur: float, conn: sqlite3.Connection | None = None) -> None:
+        sql = """INSERT INTO capital (id, cash_eur, updated_at) VALUES (1, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET cash_eur=excluded.cash_eur, updated_at=excluded.updated_at"""
+        args = (float(cash_eur), datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        if conn is not None:
+            conn.execute(sql, args)
+            return
+        with self._conn() as c:
+            c.execute(sql, args)
+
+    # -------------------------------------------------------------- portfolio
+    def get_positions(self) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM portfolio ORDER BY ticker").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_position(self, ticker: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM portfolio WHERE ticker = ?", (ticker,)).fetchone()
+        return None if row is None else dict(row)
+
+    def reset_portfolio(self, positions: list[dict[str, Any]], cash_eur: float) -> None:
+        """Borra la cartera y carga `positions` + cash en una sola transacción."""
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with self._conn() as conn:
+            conn.execute("DELETE FROM portfolio")
+            for p in positions:
+                conn.execute(
+                    """INSERT INTO portfolio (ticker, nombre_activo, cantidad, precio_medio_compra, divisa)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (p["ticker"], p.get("nombre_activo"), p["cantidad"], p["precio_medio_compra"], p["divisa"]),
+                )
+                conn.execute(
+                    """INSERT INTO trades (timestamp, ticker, side, cantidad, precio, divisa, fx_to_eur, importe_eur)
+                       VALUES (?, ?, 'INIT', ?, ?, ?, 1.0, 0.0)""",
+                    (now, p["ticker"], p["cantidad"], p["precio_medio_compra"], p["divisa"]),
+                )
+            self.set_cash(cash_eur, conn)
+
+    def apply_trade(
+        self,
+        ticker: str,
+        side: str,
+        cantidad: float,
+        precio: float,
+        divisa: str,
+        fx_to_eur: float,
+        new_position: dict[str, Any] | None,
+        new_cash_eur: float,
+        pnl_realizado_eur: float | None = None,
+    ) -> None:
+        """Escribe posición, cash y operación de forma atómica. `new_position=None` borra la posición."""
+        with self._conn() as conn:
+            if new_position is None:
+                conn.execute("DELETE FROM portfolio WHERE ticker = ?", (ticker,))
+            else:
+                conn.execute(
+                    """INSERT INTO portfolio (ticker, nombre_activo, cantidad, precio_medio_compra, divisa)
+                       VALUES (?, ?, ?, ?, ?)
+                       ON CONFLICT(ticker) DO UPDATE SET
+                         nombre_activo=excluded.nombre_activo, cantidad=excluded.cantidad,
+                         precio_medio_compra=excluded.precio_medio_compra, divisa=excluded.divisa""",
+                    (ticker, new_position.get("nombre_activo"), new_position["cantidad"],
+                     new_position["precio_medio_compra"], new_position["divisa"]),
+                )
+            self.set_cash(new_cash_eur, conn)
+            conn.execute(
+                """INSERT INTO trades (timestamp, ticker, side, cantidad, precio, divisa, fx_to_eur,
+                                       importe_eur, pnl_realizado_eur)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (datetime.now(timezone.utc).isoformat(timespec="seconds"), ticker, side, cantidad, precio,
+                 divisa, fx_to_eur, cantidad * precio * fx_to_eur, pnl_realizado_eur),
+            )
+
+    def trades(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]

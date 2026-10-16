@@ -59,18 +59,52 @@ def strength_label(final_score: int, strong: int = 60) -> str:
     return "Señal moderada"
 
 
+def support_from_reports(reports: dict[str, Any]) -> dict[str, Any] | None:
+    """Extrae el soporte clave del informe del Agente Técnico (None si no hay)."""
+    tech = reports.get("technical")
+    m = getattr(tech, "metrics", None) or {}
+    if m.get("soporte_clave") is None:
+        return None
+    return {
+        "price": m["soporte_clave"],
+        "type": m.get("soporte_clave_tipo") or "",
+        "distance_pct": m.get("soporte_clave_distancia_pct"),
+        "currency": m.get("divisa") or "",
+    }
+
+
+def format_support(support: dict[str, Any] | None) -> str | None:
+    if not support:
+        return None
+    e = html.escape
+    detail = e(support.get("type") or "")
+    if support.get("distance_pct") is not None:
+        detail += f", {support['distance_pct']:+.1f}%"
+    return (
+        f"🛡️ Soporte clave cercano: <b>{support['price']:,.2f} {e(support.get('currency') or '')}</b>".rstrip()
+        + (f" ({detail})" if detail else "")
+    )
+
+
 def format_signal(
     signal_json: dict[str, Any],
     vetoes: Iterable[str] = (),
     notes: Iterable[str] = (),
     strong: int = 60,
+    support: dict[str, Any] | None = None,
+    header: str | None = None,
 ) -> str:
-    """Mensaje HTML a partir del JSON estricto del CIO (`CIODecision.to_output_json()`)."""
+    """Mensaje HTML a partir del JSON estricto del CIO (`CIODecision.to_output_json()`).
+
+    `support` es el soporte clave del Agente Técnico (ver `support_from_reports`) y `header`
+    una cabecera opcional (p. ej. la alerta de oportunidad de caída).
+    """
     e = html.escape
     action = str(signal_json.get("action", "HOLD"))
     score = int(signal_json.get("final_score", 0))
     params = signal_json.get("execution_parameters", {})
-    lines = [
+    lines = [header] if header else []
+    lines += [
         f"{ACTION_EMOJI.get(action, 'ℹ️')} <b>{e(action)} · {e(str(signal_json.get('ticker', '?')))}</b>",
         f"Score final: <b>{score:+d}</b> ({strength_label(score, strong)}) · "
         f"Confianza: {e(str(signal_json.get('confidence_level', '?')))}",
@@ -82,6 +116,9 @@ def format_signal(
             f"🛑 Stop-loss: {params.get('stop_loss_price', 0):.2f} · "
             f"🎯 Take-profit: {params.get('take_profit_target', 0):.2f}"
         )
+    support_line = format_support(support)
+    if support_line:
+        lines.append(support_line)
     vetoes = list(vetoes)
     if vetoes:
         lines.append("🚫 <b>Veto de riesgo activo:</b> " + e("; ".join(vetoes)))
@@ -98,6 +135,7 @@ def send_telegram_alert(
     vetoes: Iterable[str] = (),
     notes: Iterable[str] = (),
     strong: int = 60,
+    support: dict[str, Any] | None = None,
 ) -> bool:
     """Envía la señal del CIO con emoji según la acción (🟢 BUY, 🔴 SELL, ⚠️ REDUCE, ⏸️ HOLD)."""
-    return send_telegram_message(format_signal(signal_json, vetoes, notes, strong))
+    return send_telegram_message(format_signal(signal_json, vetoes, notes, strong, support))

@@ -25,7 +25,7 @@ SENTIMENT_SCHEMA = {
 }
 
 SYSTEM_PROMPT = """Eres el Analista de Sentimiento y Macro de un comité de inversión que gestiona \
-una cartera de 7.000 € de un inversor residente fiscal en España, con prioridad absoluta en la \
+la cartera de un pequeño inversor residente fiscal en España, con prioridad absoluta en la \
 preservación del capital.
 
 Tu tarea:

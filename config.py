@@ -79,6 +79,11 @@ class AlertRules:
     weekly_report_day: str = "friday"
     weekly_report_time: str = "23:00"
     performance_horizons_days: tuple[int, ...] = (7, 30)
+    # Francotirador (detector de caídas intradía con velas de 1 minuto)
+    sniper_interval_minutes: int = 5        # frecuencia de escaneo con el mercado abierto
+    dip_drop_pct: float = 5.0               # caída diaria que fuerza el análisis completo
+    dip_rsi: float = 30.0                   # RSI(14) que cruza por debajo de este nivel
+    dip_min_fundamental: float = 60.0       # Fundamental (0-100) para "fundamental intacto"
 
 
 # P/E de referencia por sector (aprox. medianas del S&P 500, revisables).

@@ -44,7 +44,7 @@ CIO_SCHEMA = {
 }
 
 SYSTEM_PROMPT = """Eres el Chief Investment Officer (CIO) de un comité de inversión multiagente. \
-Gestionas una cartera de 7.000 € de un inversor residente fiscal en España. Prioridades, en orden: \
+Gestionas la cartera de un pequeño inversor residente fiscal en España (el capital total actual figura en `risk_manager.rules`). Prioridades, en orden: \
 (1) preservación del capital, (2) minimizar comisiones evitando el overtrading, (3) rentabilidad.
 
 Recibes los informes de 4 agentes especialistas ya normalizados a la escala -100..100 y el score \
@@ -136,10 +136,10 @@ class CIOAgent:
             "risk_manager": {
                 **plan.to_dict(),
                 "rules": {
-                    "capital_eur": self.settings.risk.base_capital_eur,
-                    "max_position_eur": self.settings.risk.max_position_eur,
+                    "capital_eur": round(plan.capital_eur or self.settings.risk.base_capital_eur, 2),
+                    "max_position_eur": round(plan.max_position_eur or self.settings.risk.max_position_eur, 2),
                     "min_trade_eur": self.settings.risk.min_trade_eur,
-                    "max_risk_per_trade_eur": self.settings.risk.max_risk_eur,
+                    "max_risk_per_trade_eur": round(plan.max_risk_eur or self.settings.risk.max_risk_eur, 2),
                 },
             },
         }

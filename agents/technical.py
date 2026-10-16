@@ -66,7 +66,18 @@ def atr(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 14) -> pd.Se
 
 
 def sma(close: pd.Series, n: int) -> pd.Series:
-    return ta.sma(close, length=n) if ta is not None else close.rolling(n).mean()
+    out = ta.sma(close, length=n) if ta is not None else None
+    # pandas-ta devuelve None si hay menos de n sesiones (p. ej. una salida a bolsa reciente).
+    return out if out is not None else close.rolling(n).mean()
+
+
+def key_support(price: float, levels: dict[str, float]) -> tuple[str, float] | None:
+    """Soporte más cercano POR DEBAJO del precio entre los niveles candidatos, o None."""
+    below = {name: v for name, v in levels.items() if math.isfinite(v) and 0 < v <= price}
+    if not below:
+        return None
+    name = max(below, key=below.get)
+    return name, below[name]
 
 
 def _last(s: pd.Series | None) -> float:
@@ -159,6 +170,20 @@ class TechnicalAgent(BaseAgent):
             flags.append("Precio bajo banda de Bollinger inferior")
 
         score = float(np.clip(score, 0, 100))
+
+        # --- Soporte clave: el nivel relevante más cercano por debajo del precio. Los mínimos
+        # excluyen la sesión actual (en un día de caída el mínimo de hoy no es un soporte).
+        prior_low = low.iloc[:-1]
+        support = key_support(price, {
+            "SMA200": sma200,
+            "SMA50": sma50,
+            "Banda inferior de Bollinger": bb_lower,
+            "Mínimo de 30 sesiones": float(prior_low.iloc[-30:].min()),
+            "Mínimo de 52 semanas": float(prior_low.iloc[-252:].min()),
+        })
+        if support is None:
+            flags.append("Sin soporte por debajo (mínimos de 52 semanas)")
+
         metrics = {
             "price": price,
             "rsi_14": rsi14,
@@ -177,6 +202,10 @@ class TechnicalAgent(BaseAgent):
             "atr_14": atr14,
             "atr_pct": atr14 / price if price else None,
             "return_20d_pct": ret20 * 100,
+            "soporte_clave": support[1] if support else None,
+            "soporte_clave_tipo": support[0] if support else None,
+            "soporte_clave_distancia_pct": (support[1] / price - 1) * 100 if support else None,
+            "divisa": snapshot.currency,
         }
         metrics = {k: (round(v, 4) if isinstance(v, float) and math.isfinite(v) else v) for k, v in metrics.items()}
         trend = "alcista" if "Tendencia alcista" in flags else "bajista" if "Tendencia bajista" in flags else "lateral"

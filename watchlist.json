@@ -17,6 +17,42 @@
         "XLV"
       ]
     },
+    "bigtech_ai": {
+      "label": "Big Tech & IA",
+      "tickers": [
+        "META",
+        "NVDA",
+        "GOOGL",
+        "AMZN",
+        "ASML",
+        "TSM"
+      ]
+    },
+    "disruptive": {
+      "label": "Disruptivas, Fintech & Espacio",
+      "tickers": [
+        "RDDT",
+        "IBKR",
+        "MELI",
+        "SPCX"
+      ]
+    },
+    "energy": {
+      "label": "Nuclear, Energía & Utilities",
+      "tickers": [
+        "OKLO",
+        "VST",
+        "URNM",
+        "CCJ"
+      ]
+    },
+    "ai_picks": {
+      "label": "Sugerencias IA",
+      "tickers": [
+        "PLTR",
+        "CEG"
+      ]
+    },
     "spain": {
       "label": "Mercado continuo / IBEX 35",
       "tickers": [
@@ -24,81 +60,11 @@
         "REP.MC",
         "BBVA.MC",
         "SAN.MC",
-        "TSK.MC"
+        "TSK.MC",
+        "IDR.MC",
+        "ANA.MC"
       ]
     }
   },
-  "corporate_watch": [
-    {
-      "name": "Grupo TSK",
-      "queries": [
-        "\"Grupo TSK\"",
-        "\"TSK\" Gijón ingeniería"
-      ],
-      "must_mention": [
-        "tsk"
-      ],
-      "keywords": {
-        "IPO / salida a bolsa / colocación": [
-          "salida a bolsa",
-          "sale a bolsa",
-          "saldrá a bolsa",
-          "debut bursátil",
-          "estreno en bolsa",
-          "opv",
-          "ops",
-          "ipo",
-          "bme growth",
-          "folleto",
-          "colocación acelerada",
-          "listing"
-        ],
-        "Contrato de gran escala": [
-          "contrato",
-          "contratos",
-          "adjudica",
-          "adjudicación",
-          "adjudicado",
-          "encargo",
-          "llave en mano",
-          "epc",
-          "megaproyecto",
-          "cartera de pedidos",
-          "contract",
-          "awarded"
-        ],
-        "Operación corporativa": [
-          "opa",
-          "fusión",
-          "adquisición",
-          "adquiere",
-          "compra de",
-          "venta de",
-          "participación",
-          "ampliación de capital",
-          "private equity",
-          "acquisition",
-          "stake"
-        ],
-        "Litigio / riesgo": [
-          "justicia",
-          "tribunal",
-          "juez",
-          "demanda",
-          "litigio",
-          "laudo",
-          "arbitraje",
-          "avales",
-          "multa",
-          "sanción",
-          "concurso",
-          "cae",
-          "se desploma",
-          "desplome",
-          "profit warning"
-        ]
-      },
-      "note": "Cotiza como TSK.MC (analizada a diario en el grupo spain); aquí se vigilan sus noticias."
-    }
-  ]
+  "corporate_watch": []
 }

@@ -84,6 +84,9 @@ class RiskPlan:
     risk_eur: float
     tradeable: bool
     reason: str = ""
+    capital_eur: float = 0.0           # capital total sobre el que se aplican los límites
+    max_position_eur: float = 0.0      # 10 % de capital_eur
+    max_risk_eur: float = 0.0          # 2 % de capital_eur
 
     def to_dict(self) -> dict[str, Any]:
         return {k: (round(v, 4) if isinstance(v, float) else v) for k, v in asdict(self).items()}

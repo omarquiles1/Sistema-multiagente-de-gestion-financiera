@@ -10,7 +10,7 @@ from database import Database
 from models import Action, CIODecision, Confidence
 from performance_tracker import PerformanceTracker, format_report
 from scheduler import MarketService, should_alert
-from watchlist import Watchlist, load_watchlist
+from watchlist import CorporateTarget, Watchlist, load_watchlist
 from tests.conftest import make_ohlcv
 
 NOW = datetime(2026, 10, 16, 21, 0, tzinfo=timezone.utc)
@@ -84,12 +84,27 @@ def test_should_alert(score, vetoes, expected):
 # ---------------------------------------------------------------- watchlist
 def test_default_watchlist():
     wl = load_watchlist()
-    assert wl.tickers == ["URTH", "EEM", "XLE", "URNM", "XLK", "XLI", "XLV", "IBE.MC", "REP.MC", "BBVA.MC", "SAN.MC", "TSK.MC"]
-    assert wl.corporate_watch[0].name == "Grupo TSK"
+    assert wl.tickers == [
+        "URTH", "EEM", "XLE", "URNM", "XLK", "XLI", "XLV",
+        "META", "NVDA", "GOOGL", "AMZN", "ASML", "TSM", "RDDT", "IBKR", "MELI", "SPCX",
+        "OKLO", "VST", "CCJ", "PLTR", "CEG",
+        "IBE.MC", "REP.MC", "BBVA.MC", "SAN.MC", "TSK.MC", "IDR.MC", "ANA.MC",
+    ]
+    assert wl.corporate_watch == ()   # TSK y SpaceX cotizan: sin rastreo de noticias
 
 
 # ---------------------------------------------------------- corporate watch
-TSK = load_watchlist().corporate_watch[0]
+# Objetivo de ejemplo para probar el mecanismo (la watchlist real ya no vigila noticias).
+TSK = CorporateTarget(
+    name="Grupo TSK",
+    queries=("Grupo TSK",),
+    must_mention=("tsk",),
+    keywords={
+        "IPO / salida a bolsa / colocación": ("salida a bolsa", "opv", "ops", "ipo", "colocación acelerada"),
+        "Contrato de gran escala": ("contrato", "adjudica", "epc"),
+        "Litigio / riesgo": ("justicia", "avales", "cae"),
+    },
+)
 
 
 @pytest.mark.parametrize("title,category", [
@@ -214,10 +229,13 @@ def test_register_weekdays_at_madrid_close(tmp_path):
                             orchestrator=StubOrchestrator({}), corporate=NoCorporate(), send=lambda t: True)
     sch = schedule.Scheduler()
     service.register(sch)
-    days = sorted(j.start_day for j in sch.jobs)
+    timed = [j for j in sch.jobs if j.at_time is not None]
+    days = sorted(j.start_day for j in timed)
     assert days == sorted(["monday", "tuesday", "wednesday", "thursday", "friday", "friday"])
-    assert {str(j.at_time) for j in sch.jobs} == {"22:30:00", "23:00:00"}
-    assert all(str(j.at_time_zone) == "Europe/Madrid" for j in sch.jobs)
+    assert {str(j.at_time) for j in timed} == {"22:30:00", "23:00:00"}
+    assert all(str(j.at_time_zone) == "Europe/Madrid" for j in timed)
+    sniper = [j for j in sch.jobs if j.at_time is None]
+    assert len(sniper) == 1 and sniper[0].interval == 5 and sniper[0].unit == "minutes"
 
 
 def test_safe_wrapper_swallows_job_errors():
