@@ -141,7 +141,7 @@ def test_drop_with_intact_fundamental_fires_opportunity():
     assert calls == [("NVDA", q.price, True)]               # precio de 1 minuto + modo Buy the Dip
     assert events[0].opportunity
     assert sent[0].startswith("🚨 <b>OPORTUNIDAD DE CAÍDA DETECTADA: NVDA ha caído un 6.0%. El fundamental sigue intacto.</b>")
-    assert "🛡️ Soporte clave cercano" in sent[0] and "Precio 1m" in sent[0]
+    assert "🛡️ Soporte clave cercano" in sent[0] and "Vela de 1 min" in sent[0]
 
 
 def test_opportunity_calls_hook_only_when_intact():

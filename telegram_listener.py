@@ -30,7 +30,7 @@ from typing import Any, Callable
 import requests
 
 from config import SETTINGS
-from notifier import format_signal, send_telegram_message, support_from_reports
+from notifier import format_analysis, send_telegram_message
 from portfolio import PortfolioError, PortfolioManager, format_portfolio, format_trade
 
 log = logging.getLogger("telegram")
@@ -119,18 +119,7 @@ class TelegramBot:
             result = self.analyze_fn(ticker)
         except Exception as exc:
             return f"❌ No se pudo analizar {html.escape(ticker)}: {html.escape(str(exc))}"
-        d, p = result.decision, result.plan
-        scores = " · ".join(
-            f"{name[:4].capitalize()} {rep.normalized():+.0f}" for name, rep in result.reports.items()
-        )
-        sizing = (
-            f"Plan: {p.position_size_eur:.2f} € (máx. {p.max_position_eur:.0f} € sobre {p.capital_eur:.0f} € de capital)"
-            if p.tradeable else f"Plan: no operable · {html.escape(p.reason)}"
-        )
-        return (
-            format_signal(d.to_output_json(), d.vetoes, d.guardrail_notes, support=support_from_reports(result.reports))
-            + f"\n\n📊 Agentes (−100..100): {scores}\n{sizing}"
-        )
+        return format_analysis(result)
 
     def cmd_operaciones(self, args: list[str]) -> str:
         trades = self.portfolio.db.trades(10)

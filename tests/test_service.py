@@ -311,3 +311,55 @@ def test_safe_wrapper_swallows_job_errors():
         raise RuntimeError("x")
 
     MarketService._safe(boom)   # no lanza
+
+
+# ------------------------------------------------------- formato humano
+def analysis_result(notes=(), justification="Fundamentales sólidos y tendencia alcista.", action=Action.BUY):
+    from models import AgentReport
+
+    class R:
+        decision = CIODecision("META", action, 42, Confidence.MEDIUM, justification, 600.0, 650.0, 800.0,
+                               guardrail_notes=list(notes))
+        reports = {
+            "fundamental": AgentReport("fundamental", 72, (0, 100)),
+            "technical": AgentReport("technical", 35, (0, 100), flags=["Tendencia bajista"], metrics={
+                "price": 700.0, "soporte_clave": 680.0, "soporte_clave_tipo": "SMA200",
+                "soporte_clave_distancia_pct": -2.86, "divisa": "USD"}),
+            "sentiment": AgentReport("sentiment", -10, (-100, 100)),
+            "risk": AgentReport("risk", 30, (0, 100), flags=["Volatilidad extrema"]),
+        }
+
+    return R()
+
+
+def test_format_analysis_is_human_readable():
+    text = notifier.format_analysis(analysis_result())
+    for expected in [
+        "🟢 <b>COMPRAR · META</b>", "confianza media", "💵 Precio: 700,00 USD",
+        "🏢 Fundamental: <b>72/100</b> (Sólido)", "📈 Técnico: <b>35/100</b> (Bajista)",
+        "📰 Sentimiento: <b>-10</b> (Neutral)", "🛡️ Riesgo: <b>30/100</b> (Volatilidad extrema)",
+        "💶 Tamaño sugerido: <b>600,00 €</b>",
+        "🛑 Stop-loss: <b>650,00 USD</b> (−7,1 %)", "✅ Take-profit: <b>800,00 USD</b> (+14,3 %)",
+        "🛡️ Soporte clave cercano: <b>680,00 USD</b> · SMA200 (−2,9 %)",
+        "💬 <i>Fundamentales sólidos y tendencia alcista.</i>",
+    ]:
+        assert expected in text, expected
+    assert "Nota" not in text
+
+
+def test_format_analysis_hides_llm_errors():
+    raw = "CIO en modo determinista (LLM no disponible: Could not resolve authentication method. Expected one of api_key)"
+    text = notifier.format_analysis(analysis_result(
+        notes=[raw, "Ya se recomendó comprar hace 2 días: se mantiene la posición para no sobreoperar"],
+        justification="Score ponderado +42.0 (F +4, T +80, S +0, R +80). Decisión por umbrales sin LLM.",
+        action=Action.HOLD,
+    ))
+    assert "authentication" not in text and "Traceback" not in text and "Score ponderado" not in text
+    assert notifier.LLM_OFFLINE_NOTE in text
+    assert "• Ya se recomendó comprar hace 2 días" in text
+    assert "Tamaño sugerido" not in text            # solo en compras
+
+
+def test_format_signal_also_hides_llm_errors():
+    text = notifier.format_signal(decision().to_output_json(), notes=["CIO en modo determinista (LLM no disponible: x)"])
+    assert "LLM no disponible" not in text and notifier.LLM_OFFLINE_NOTE in text

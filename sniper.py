@@ -31,7 +31,7 @@ import pandas as pd
 from agents.cio import fundamental_intact
 from agents.technical import rsi
 from config import SETTINGS, AlertRules
-from notifier import format_signal, support_from_reports
+from notifier import format_analysis
 
 log = logging.getLogger("sniper")
 
@@ -198,15 +198,10 @@ class Sniper:
                 f"No se considera oportunidad ({e(why)})."
             )
         context = (
-            f"⏱️ Precio 1m: <b>{q.price:,.2f}</b> ({q.bar_time.astimezone(MADRID):%H:%M} Madrid) · "
-            f"cierre ayer {q.prev_close:,.2f} · RSI {q.rsi_now:.0f}\n"
-            f"🏛️ Fundamental {fund.score:.0f}/100\n" + "\n".join(f"• {e(r)}" for r in reasons)
+            f"⏱️ Vela de 1 min de las {q.bar_time.astimezone(MADRID):%H:%M} · cierre de ayer "
+            f"{q.prev_close:,.2f} · RSI {q.rsi_now:.0f}\n" + "\n".join(f"• {e(r)}" for r in reasons)
         )
-        d = result.decision
-        msg = format_signal(
-            d.to_output_json(), d.vetoes, d.guardrail_notes,
-            support=support_from_reports(result.reports), header=f"{header}\n{context}\n",
-        )
+        msg = format_analysis(result, header=f"{header}\n{context}\n")
         self.notify(msg)
         if intact and self.on_opportunity:
             self.on_opportunity(q.ticker)

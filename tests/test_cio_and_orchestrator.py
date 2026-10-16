@@ -102,7 +102,7 @@ def test_dip_mode_ignores_vetoes_and_forces_buy(kw):
     assert d.vetoes                                          # el veto se informa, pero no bloquea
     assert d.suggested_position_size_eur == pytest.approx(700.0)
     assert any("vetos ignorados" in n for n in d.guardrail_notes)
-    assert any("convertido en BUY" in n for n in d.guardrail_notes)
+    assert any("se compra pese a la caída" in n for n in d.guardrail_notes)
 
 
 def test_dip_mode_tells_llm_and_hides_vetoes():

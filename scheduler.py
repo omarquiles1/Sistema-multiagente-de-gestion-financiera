@@ -41,7 +41,7 @@ from config import SETTINGS, Settings
 from database import Database
 from main import AnalysisResult, Orchestrator
 from models import CIODecision
-from notifier import format_signal, send_telegram_message, support_from_reports, telegram_configured
+from notifier import format_analysis, send_telegram_message, telegram_configured
 from performance_tracker import PerformanceTracker, format_report
 from portfolio import PortfolioManager
 from sniper import Sniper
@@ -150,13 +150,7 @@ class MarketService:
                          ticker, self.settings.alerts.veto_alert_cooldown_days)
                 summary.muted.append(ticker)
             elif should_alert(d, strong):
-                self.notify(
-                    format_signal(
-                        d.to_output_json(), d.vetoes, d.guardrail_notes, strong,
-                        support=support_from_reports(getattr(result, "reports", {})),
-                    ),
-                    summary,
-                )
+                self.notify(format_analysis(result, strong=strong), summary)
                 summary.alerted.append(ticker)
 
         for target in self.watchlist.corporate_watch:

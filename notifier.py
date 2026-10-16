@@ -21,6 +21,10 @@ log = logging.getLogger(__name__)
 TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 MAX_MESSAGE_CHARS = 4096
 ACTION_EMOJI = {"BUY": "🟢", "SELL": "🔴", "REDUCE": "⚠️", "HOLD": "⏸️"}
+ACTION_LABEL = {"BUY": "COMPRAR", "SELL": "VENDER", "REDUCE": "REDUCIR", "HOLD": "MANTENER"}
+CONFIDENCE_LABEL = {"HIGH": "alta", "MEDIUM": "media", "LOW": "baja"}
+LLM_OFFLINE_NOTE = "⚠️ Nota: Análisis redactado en modo matemático (IA de Claude desconectada o sin API key)."
+_LLM_OFFLINE_PREFIX = "CIO en modo determinista"
 
 
 def telegram_configured() -> bool:
@@ -86,6 +90,125 @@ def format_support(support: dict[str, Any] | None) -> str | None:
     )
 
 
+def clean_notes(notes: Iterable[str]) -> tuple[list[str], bool]:
+    """Quita del mensaje los errores técnicos del LLM. Devuelve (notas, ¿IA desconectada?)."""
+    kept, offline = [], False
+    for n in notes:
+        if n.startswith(_LLM_OFFLINE_PREFIX):
+            offline = True
+        else:
+            kept.append(n)
+    return kept, offline
+
+
+def _n(x: float, decimals: int = 2) -> str:
+    """Número en formato español: 1.234,56."""
+    return f"{x:,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _pct(x: float) -> str:
+    return f"{x:+.1f}".replace(".", ",").replace("-", "−") + " %"
+
+
+def _agent_lines(reports: dict[str, Any]) -> list[str]:
+    def get(name):
+        return reports.get(name)
+
+    def score(rep, signed=False):
+        return f"{rep.score:+.0f}" if signed else f"{rep.score:.0f}/100"
+
+    lines = ["📊 <b>Análisis</b>"]
+    f = get("fundamental")
+    if f is not None:
+        # Mismo umbral que el francotirador usa para "fundamental intacto".
+        from config import SETTINGS
+
+        solid = SETTINGS.alerts.dip_min_fundamental
+        label = "sin datos" if f.error else "Sólido" if f.score >= solid else "Neutro" if f.score >= 40 else "Débil"
+        lines.append(f"🏢 Fundamental: <b>{'—' if f.error else score(f)}</b> ({label})")
+    t = get("technical")
+    if t is not None:
+        trend = (
+            "sin datos" if t.error
+            else "Alcista" if "Tendencia alcista" in t.flags
+            else "Bajista" if "Tendencia bajista" in t.flags
+            else "Lateral"
+        )
+        lines.append(f"📈 Técnico: <b>{'—' if t.error else score(t)}</b> ({trend})")
+    s = get("sentiment")
+    if s is not None:
+        mood = "Positivo" if s.score >= 25 else "Negativo" if s.score <= -25 else "Neutral"
+        lines.append(f"📰 Sentimiento: <b>{score(s, signed=True)}</b> ({mood})")
+    r = get("risk")
+    if r is not None:
+        level = (
+            "sin datos" if r.error
+            else "Volatilidad extrema" if any("Volatilidad extrema" in fl for fl in r.flags)
+            else "Riesgo bajo" if r.score >= 65 else "Riesgo moderado" if r.score >= 40 else "Riesgo alto"
+        )
+        lines.append(f"🛡️ Riesgo: <b>{'—' if r.error else score(r)}</b> ({level})")
+    return lines if len(lines) > 1 else []
+
+
+def format_analysis(result: Any, header: str | None = None, strong: int = 60) -> str:
+    """Mensaje completo y legible de un análisis (`main.AnalysisResult`).
+
+    Lo usan /analiza, la alerta diaria y el francotirador. Toma lo que haya en `result`
+    (decision obligatoria; reports, plan y snapshot opcionales).
+    """
+    e = html.escape
+    d = result.decision
+    reports = getattr(result, "reports", None) or {}
+    plan = getattr(result, "plan", None)
+    snap = getattr(result, "snapshot", None)
+    tech_m = getattr(reports.get("technical"), "metrics", None) or {}
+    currency = e(getattr(snap, "currency", None) or tech_m.get("divisa") or "")
+    price = getattr(plan, "entry_price", None) or tech_m.get("price")
+    action = d.action.value
+
+    lines = [header] if header else []
+    lines += [
+        f"{ACTION_EMOJI.get(action, 'ℹ️')} <b>{ACTION_LABEL.get(action, action)} · {e(d.ticker)}</b>",
+        f"Puntuación: <b>{d.final_score:+d}</b> · {strength_label(d.final_score, strong)} · "
+        f"confianza {CONFIDENCE_LABEL.get(d.confidence_level.value, d.confidence_level.value)}",
+    ]
+    if price:
+        lines.append(f"💵 Precio: {_n(price)} {currency}")
+
+    agents = _agent_lines(reports)
+    if agents:
+        lines += [""] + agents
+
+    # --- Orden: lo importante, destacado
+    order = ["", "🎯 <b>Niveles de la operación</b>"]
+    if action == "BUY" and d.suggested_position_size_eur:
+        order.append(f"💶 Tamaño sugerido: <b>{_n(d.suggested_position_size_eur)} €</b>")
+
+    def level(icon, name, value):
+        dist = f" ({_pct((value / price - 1) * 100)})" if price else ""
+        return f"{icon} {name}: <b>{_n(value)} {currency}</b>{dist}"
+
+    order.append(level("🛑", "Stop-loss", d.stop_loss_price))
+    order.append(level("✅", "Take-profit", d.take_profit_target))
+    support = support_from_reports(reports)
+    if support:
+        dist = f" ({_pct(support['distance_pct'])})" if support.get("distance_pct") is not None else ""
+        order.append(f"🛡️ Soporte clave cercano: <b>{_n(support['price'])} {currency}</b> · {e(support['type'])}{dist}")
+    lines += order
+
+    if d.vetoes:
+        lines += ["", "🚫 <b>Veto de riesgo:</b> " + e("; ".join(v.split(": ", 1)[-1] for v in d.vetoes))]
+
+    notes, offline = clean_notes(d.guardrail_notes)
+    if d.justification and not offline:
+        lines += ["", f"💬 <i>{e(d.justification)}</i>"]
+    if notes:
+        lines += [""] + [f"• {e(n)}" for n in notes]
+    if offline:
+        lines += ["", LLM_OFFLINE_NOTE]
+    return "\n".join(lines)
+
+
 def format_signal(
     signal_json: dict[str, Any],
     vetoes: Iterable[str] = (),
@@ -122,11 +245,13 @@ def format_signal(
     vetoes = list(vetoes)
     if vetoes:
         lines.append("🚫 <b>Veto de riesgo activo:</b> " + e("; ".join(vetoes)))
-    if signal_json.get("justification"):
+    notes, offline = clean_notes(notes)
+    if signal_json.get("justification") and not offline:
         lines.append(f"\n<i>{e(str(signal_json['justification']))}</i>")
-    notes = list(notes)
     if notes:
         lines.append("\n" + "\n".join(f"• {e(n)}" for n in notes))
+    if offline:
+        lines.append("\n" + LLM_OFFLINE_NOTE)
     return "\n".join(lines)
 
 

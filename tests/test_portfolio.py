@@ -243,7 +243,7 @@ def test_bot_analiza_runs_orchestrator(tmp_path):
     bot, sent = make_bot(tmp_path, orch.analyze)
     reply = bot.handle_text("/analiza test")
     assert sent[0].startswith("⏳ Analizando TEST")
-    assert "TEST" in reply and "Agentes" in reply
+    assert "TEST" in reply and "Análisis" in reply and "Traceback" not in reply
 
 
 def test_bot_analiza_reports_failures(tmp_path):

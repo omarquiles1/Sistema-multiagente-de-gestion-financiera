@@ -81,14 +81,15 @@ class RiskManager:
 
         # Regla 3: tamaño mínimo por costes (300 €).
         if position_eur < self.rules.min_trade_eur:
-            reason = (
-                f"Posición resultante {position_eur:.2f} € < mínimo {self.rules.min_trade_eur:.0f} € "
-                "(operación no rentable por comisiones)"
-            )
-            if existing_position_eur > 0:
-                reason += (
-                    f"; ya tienes {existing_position_eur:.2f} € de este activo "
-                    f"(límite {max_position_eur:.2f} € = {self.rules.max_position_pct:.0%} del capital)"
+            if existing_position_eur > 0 and max_position_eur - existing_position_eur < self.rules.min_trade_eur:
+                reason = (
+                    f"ya tienes {existing_position_eur:.2f} € en este activo y el límite por posición es "
+                    f"{max_position_eur:.2f} € ({self.rules.max_position_pct:.0%} del capital)"
+                )
+            else:
+                reason = (
+                    f"el tamaño posible ({position_eur:.2f} €) no llega al mínimo de "
+                    f"{self.rules.min_trade_eur:.0f} € por operación (las comisiones se comerían la ganancia)"
                 )
             return RiskPlan(
                 entry_price=price, entry_price_eur=price_eur, atr=atr if atr else float("nan"),
