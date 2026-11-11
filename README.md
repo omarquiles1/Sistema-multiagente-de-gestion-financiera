@@ -125,8 +125,10 @@ un BUY ha perforado su stop-loss.
 `https://api.telegram.org/bot<TOKEN>/getUpdates`. Sin token, el servicio sigue funcionando y
 registra un aviso.
 
-El bucle necesita que el equipo esté encendido a las 22:30. Como alternativa, el Programador de
-tareas de Windows puede lanzar `scheduler.py --once` L-V a las 22:30 y `--report-now` los viernes.
+El bucle necesita que el equipo esté encendido a las 22:30. En producción corre 24/7 en una VM de
+Google Cloud como servicio `systemd`: ver [DESPLIEGUE.md](DESPLIEGUE.md). Como alternativa local,
+el Programador de tareas de Windows puede lanzar `scheduler.py --once` L-V a las 22:30 y
+`--report-now` los viernes.
 
 Sin credenciales de Anthropic el sistema **sigue funcionando**: el agente de Sentimiento usa un
 léxico de respaldo y el CIO decide por umbrales sobre el score ponderado. Cada caso queda anotado
