@@ -1,0 +1,17 @@
+# Servicio systemd del bot financiero (scheduler.py + bot de comandos de Telegram).
+# USUARIO se sustituye al instalar; ver DESPLIEGUE.md.
+[Unit]
+Description=Bot financiero (scheduler.py)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=USUARIO
+WorkingDirectory=/home/USUARIO/Sistema-multiagente-de-gestion-financiera
+ExecStart=/home/USUARIO/Sistema-multiagente-de-gestion-financiera/.venv/bin/python scheduler.py
+Restart=always
+RestartSec=30
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
