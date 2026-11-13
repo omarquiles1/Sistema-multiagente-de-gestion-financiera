@@ -5,3 +5,10 @@ __pycache__/
 .venv/
 .env.*
 !.env.example
+
+# Logs locales del bot (pueden contener datos de cartera)
+logs/
+portfolio*.log
+portfolio*.out
+portfolio*.err
+portfolio*.page
