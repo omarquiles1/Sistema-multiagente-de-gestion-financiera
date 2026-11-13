@@ -1,0 +1,17 @@
+#!/bin/sh
+# Pre-commit: bloquea el commit si gitleaks encuentra un secreto en lo que está en stage.
+# Se activa una vez por copia de trabajo con:  git config core.hooksPath .githooks
+# Reglas en .gitleaks.toml (incluye las claves sk-ant-usr, que la regla por defecto no detecta).
+GL=$(command -v gitleaks 2>/dev/null)
+if [ -z "$GL" ]; then
+  for c in "$HOME"/AppData/Local/Microsoft/WinGet/Packages/Gitleaks*/gitleaks.exe; do
+    [ -f "$c" ] && GL="$c" && break
+  done
+fi
+if [ -z "$GL" ]; then
+  echo "pre-commit: gitleaks no está instalado, así que el commit queda BLOQUEADO." >&2
+  echo "  Windows: winget install Gitleaks.Gitleaks   ·   Linux: https://github.com/gitleaks/gitleaks/releases" >&2
+  exit 1
+fi
+ROOT=$(git rev-parse --show-toplevel)
+exec "$GL" git --pre-commit --staged --redact --no-banner --config "$ROOT/.gitleaks.toml" "$ROOT"

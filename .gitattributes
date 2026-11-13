@@ -1,0 +1,2 @@
+# Los hooks son scripts sh: siempre LF (con CRLF no arrancan en Linux)
+.githooks/* text eol=lf
